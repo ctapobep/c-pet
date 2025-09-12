@@ -1,0 +1,31 @@
+cmake_minimum_required(VERSION 3.29)
+project(cmake_pet)
+
+set(CMAKE_CXX_STANDARD 20)
+add_definitions("-O -Wall -W -pedantic -O0") # compilation flags, hopefully this increases the number of warnings?..
+add_subdirectory(hello-lib)
+
+
+# use globs:
+file(GLOB_RECURSE SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/la/*.c)
+add_executable(cmake_pet "${SRC}"
+        src/Point.c
+        src/main.c
+        src/Point.h
+        src/la/matrix.c)
+
+# Or.. explicitly list the files:
+#add_executable(cmake_pet src/main.cpp)
+add_executable(book "${SRC}"
+        src/001pun.c
+        src/la/vector.h
+        src/la/vector_test.c
+        src/asserts.h
+        src/asserts.c
+)
+
+# Some compile-time macros/variables
+target_compile_definitions("${CMAKE_PROJECT_NAME}" PUBLIC SOME_MACRO_NAME="blah")
+
+# add libraries
+target_link_libraries(cmake_pet)
