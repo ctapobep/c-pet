@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-
+#include <signal.h>
 
 
 void signal_handler_log_stacktrace(int sig) { // There's also /lib/libSegFault.so which you can use with LD_PRELOAD.
