@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-#include "util/xterm.h"
+#include "xterm.h"
 
 void logInfo(char* str) {
 	printf("%s[INFO] %s%s\n", GREEN, str, RESET);

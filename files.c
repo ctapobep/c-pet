@@ -6,7 +6,8 @@
 #define BUFFER_SIZE 1023
 
 // TODO:
-// 1. Implement io_uring
+// 1. Use io_uring
+// 2. Use epoll
 // 2. Implement MacOS async io
 
 int writesync_hi(void) {

@@ -1,5 +1,5 @@
 #include "test_util.h"
-#include "../log.h"
+#include "log.h"
 #include "../util/signals.c"
 #include "strings.h"
 

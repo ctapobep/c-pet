@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <stdbool.h>
-#include "../log.h"
+#include "log.h"
 #include "asserts.h"
 #include "../la/matrix.h"
 

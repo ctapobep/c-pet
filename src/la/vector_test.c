@@ -1,5 +1,5 @@
 #include "vector.h"
-#include "../log.h"
+#include "../util/log.h"
 #include "../util/test_util.h"
 
 #include "../util/asserts.h"

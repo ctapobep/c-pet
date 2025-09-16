@@ -2,7 +2,7 @@
 
 #include "../util/test_util.h"
 #include "../util/asserts.h"
-#include "../log.h"
+#include "../util/log.h"
 #include "../util/signals.c"
 
 static void matrix_get_set__allow_getting_n_setting_matrix_elements() {
