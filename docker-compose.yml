@@ -1,0 +1,8 @@
+name: ubuntu4dev
+services:
+  ubuntu4dev:
+    build:
+      dockerfile: ./Dockerfile
+    container_name: ubuntu4dev
+    volumes:
+      - ./:/opt/dev
