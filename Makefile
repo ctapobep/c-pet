@@ -9,6 +9,7 @@
 DSTDIR := build
 #CFLAGS = -Wall -g
 CFLAGS := -Wall -Werror -Wextra -g -O0
+LIBS := -lm
 
 DBGDIR := debug
 DBGCFLAGS := -g -O0 -DDEBUG
@@ -27,15 +28,15 @@ all:
 test: strings_test vector_test matrix_test
 
 clean:
-	rm build/*
+	rm -f build/*
 vector_test: vector_test.o $(LA) $(UTILS)
-	$(CC) $(CFLAGS) -o build/$@ $(foreach obj, $(UTILS) $(LA), build/$(obj)) build/$@.o
+	$(CC) $(CFLAGS) -o build/$@ $(foreach obj, $(UTILS) $(LA), build/$(obj)) build/$@.o $(LIBS)
 	build/vector_test
 matrix_test: matrix_test.o $(LA) $(UTILS)
-	$(CC) $(CFLAGS) -o build/$@ $(foreach obj, $(UTILS) $(LA), build/$(obj)) build/$@.o
+	$(CC) $(CFLAGS) -o build/$@ $(foreach obj, $(UTILS) $(LA), build/$(obj)) build/$@.o $(LIBS)
 	build/matrix_test
 strings_test: strings_test.o $(UTILS)
-	$(CC) $(CFLAGS) -o build/$@ $(foreach obj, $(UTILS), build/$(obj)) build/$@.o
+	$(CC) $(CFLAGS) -o build/$@ $(foreach obj, $(UTILS), build/$(obj)) build/$@.o $(LIBS)
 	build/strings_test
 
 #matrix_test.o: src/util/asserts.h src/util/test_util.h src/la/matrix.h src/la/matrix_test.c
@@ -51,9 +52,9 @@ strings_test: strings_test.o $(UTILS)
 #     $< is the 1st prerequisite (src/log.c), $@ is the taget name (log.o)
 #	$(CC) $(CFLAGS) -c $< -o $(DSTDIR)/$@
 
-$(LA): %.o: src/la/%.c src/la/*.h src/util/xterm.h $(UTILS)
+$(LA): %.o: src/la/%.c src/la/*.h src/util/xterm.h
 	$(CC) -c $< -o build/$@
-$(LA_TESTS): %.o: src/la/%.c src/la/*.h src/util/xterm.h $(UTILS)
+$(LA_TESTS): %.o: src/la/%.c src/la/*.h src/util/xterm.h
 	$(CC) -c $< -o build/$@
 # For each .o in UTILS it generates a target:
 # target.o: src/util/target.c src/util/xterm.h log.o

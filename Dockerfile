@@ -7,5 +7,6 @@ RUN apt install -y \
     libboost-all-dev \
     libssl-dev \
     cmake
+RUN yes | unminimize
 
 ENTRYPOINT ["top", "-b"]
