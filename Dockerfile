@@ -8,5 +8,8 @@ RUN apt install -y \
     libssl-dev \
     cmake
 RUN yes | unminimize
+RUN apt install -y liburing-dev vim less netcat
+
+WORKDIR /opt/dev/
 
 ENTRYPOINT ["top", "-b"]

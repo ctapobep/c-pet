@@ -8,7 +8,7 @@
 
 DSTDIR := build
 #CFLAGS = -Wall -g
-CFLAGS := -Wall -Werror -Wextra -g -O0
+CFLAGS := -Wall -Werror -Wextra -g -O0 -I ./headers
 LIBS := -lm
 
 DBGDIR := debug
@@ -67,6 +67,8 @@ $(UTILS_TESTS): %.o: src/util/%.c src/util/*.h
 #	$(CC) $(CFLAGS) -c src/util/asserts.c -o build/asserts.o
 #strings.o: src/util/strings_test.c src/util/strings.h
 #	$(CC) $(CFLAGS) -c src/util/strings.c -o build/strings.o
+
+files.o:
 
 prep:
 	@mkdir -p $(DBGDIR) $(RELDIR)
