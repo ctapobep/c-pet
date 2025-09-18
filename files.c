@@ -49,14 +49,12 @@ int read_and_print_file_readv(char *filename) {
 	if (filesize <= 0)
 		return -1;
 #define BLKSIZE 4096
-	int block_cnt = (int)(filesize / BLKSIZE);
-	if (filesize % BLKSIZE)
-		block_cnt++;
+	int block_cnt = (int)(filesize / BLKSIZE) + (filesize % BLKSIZE > 0);
 
 	struct iovec iovecs[block_cnt];
 	// Now let's create the iovecs
 	for (ssize_t i = 0, bytes_remaining = filesize; i < block_cnt; i++, bytes_remaining -= BLKSIZE) {
-		long blksize = min(BLKSIZE, bytes_remaining);
+		size_t blksize = min(BLKSIZE, bytes_remaining);
 		void *buf = malloc(blksize);
 		iovecs[i].iov_base = buf;
 		iovecs[i].iov_len = blksize;
@@ -68,7 +66,7 @@ int read_and_print_file_readv(char *filename) {
 		return 1;
 	}
 	for (int i = 0; i < block_cnt; i++) {
-		output_buf(iovecs[i].iov_base, iovecs->iov_len);
+		output_buf(iovecs[i].iov_base, iovecs[i].iov_len);
 		free(iovecs[i].iov_base);
 	}
 	return 0;
