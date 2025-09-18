@@ -59,17 +59,20 @@ int read_and_print_file_readv(char *filename) {
 		iovecs[i].iov_base = buf;
 		iovecs[i].iov_len = blksize;
 	}
-
+	int ret = 0;
 	ssize_t error = 0;
 	if ((error = readv(fd, iovecs, block_cnt)) < 0) {
 		fprintf(stderr, "Couldn't readv(): %ld\n", error);
-		return 1;
+		ret = 1;
+		goto free;
 	}
-	for (int i = 0; i < block_cnt; i++) {
+	for (int i = 0; i < block_cnt; i++)
 		output_buf(iovecs[i].iov_base, iovecs[i].iov_len);
+
+free:
+	for (int i = 0; i <block_cnt; i++)
 		free(iovecs[i].iov_base);
-	}
-	return 0;
+	return ret;
 }
 
 // TODO:
