@@ -1,6 +1,8 @@
 name: ubuntu4dev
 services:
   ubuntu4dev:
+    security_opt:
+      - seccomp:unconfined
     build:
       dockerfile: ./Dockerfile
     container_name: ubuntu4dev

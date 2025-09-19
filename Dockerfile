@@ -8,7 +8,7 @@ RUN apt install -y \
     libssl-dev \
     cmake
 RUN yes | unminimize
-RUN apt install -y liburing-dev vim less netcat
+RUN apt install -y liburing-dev vim less netcat strace
 
 WORKDIR /opt/dev/
 
