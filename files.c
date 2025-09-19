@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <linux/io_uring.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -8,7 +7,20 @@
 #include <sys/ioctl.h>
 #include <sys/uio.h>
 #include <linux/fs.h>
+#include <unistd.h>
 
+#ifdef __linux__
+	#include <sys/syscall.h>
+#endif
+#ifdef __APPLE__ // just so that we don't see red highlights in IDE
+	#include <unistd_linux.h>
+	#include <sys/syscall_linux.h>
+#endif
+
+
+// #ifndef __NR_io_uring_setup
+// #define __NR_io_uring_setup 425
+// #endif
 
 #define BUFFER_SIZE 1023
 
@@ -75,6 +87,28 @@ free:
 	return ret;
 }
 
+struct submitter {
+	int ring_fd;
+
+};
+
+int io_uring_setup(unsigned entries, struct io_uring_params *params) {
+	return syscall(SYS_io_uring_setup, entries, params);
+}
+
+int read_and_print_file_iouring(char *filename) {
+	int ret = 0;
+	struct io_uring_params params = {};
+	int error = 0;
+	if ((error = io_uring_setup(1, &params)) < 0) {
+		fprintf(stderr, "Couldn't set up io_uring: %d", error);
+		ret = 1;
+		goto free;
+	}
+free:
+	return ret;
+}
+
 // TODO:
 // 1. Use io_uring
 // 2. Use epoll
@@ -121,7 +155,7 @@ int readsync_lo() {
 	ssize_t n;
 	while ((n = read(fd, buffer, BUFFER_SIZE)) > 0) {
 		buffer[n] = '\0';
-		fprintf(stdout, buffer);
+		puts(buffer);
 		fprintf(stdout, "*** END OF BUFFER: %lu", n);
 	}
 	close(fd);
@@ -138,28 +172,11 @@ int readasync_lo() {
 	ssize_t n;
 	while ((n = read(fd, buffer, BUFFER_SIZE)) > 0) {
 		buffer[n] = '\0';
-		fprintf(stdout, buffer);
+		puts(buffer);
 		fprintf(stdout, "*** END OF BUFFER: %lu", n);
 	}
 	close(fd);
 	return 0;
-}
-ssize_t readall(int fd, void * data, size_t count) {
-
-	ssize_t bytesRead;
-
-	char *dataPtr = data;
-	size_t total = 0;
-	while (count) {
-		bytesRead = read(fd, dataPtr, count);
-		/* we should check bytesRead for < 0 to return errors
-		properly, but this is just sample code! */
-		dataPtr += bytesRead;
-		count -= bytesRead;
-		total += bytesRead;
-	}
-
-	return total;
 }
 
 int main(void) {
@@ -169,9 +186,12 @@ int main(void) {
 	int fd = open(filename, O_RDWR);
 	if (fd < 0)
 		printf("Couldn't open the file: %d\n", fd);
-	printf("Bytes in the file: %llu\n", get_file_size(fd));
-	read_and_print_file_readv(filename);
+	printf("Bytes in the file: %ld\n", get_file_size(fd));
+	// read_and_print_file_readv(filename);
 	close(fd);
+
+	struct submitter *s;
+	read_and_print_file_iouring(filename);
 	// if ((errorCode = writesync_hi()))
 		// return errorCode;
 	// if ((errorCode = readsync_lo()))
