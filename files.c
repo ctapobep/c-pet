@@ -6,11 +6,12 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/uio.h>
-#include <linux/fs.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #ifdef __linux__
 	#include <sys/syscall.h>
+	#include <linux/fs.h>
 #endif
 #ifdef __APPLE__ // just so that we don't see red highlights in IDE
 	#include <unistd_linux.h>
@@ -99,12 +100,17 @@ int io_uring_setup(unsigned entries, struct io_uring_params *params) {
 int read_and_print_file_iouring(char *filename) {
 	int ret = 0;
 	struct io_uring_params params = {};
-	int error = 0;
-	if ((error = io_uring_setup(1, &params)) < 0) {
-		fprintf(stderr, "Couldn't set up io_uring: %d", error);
+	int fd = 0;
+	int entries = 1;
+	if ((fd = io_uring_setup(entries, &params)) < 0) {
+		fprintf(stderr, "Couldn't set up io_uring: %d", fd);
 		ret = 1;
 		goto free;
 	}
+	void *sqring = mmap(NULL, params.sq_off.array + entries * sizeof(__uint32_t),
+	                    PROT_READ | PROT_WRITE, MAP_SHARED/*|MAP_POPULATE*/, fd, IORING_OFF_SQ_RING);
+	void *sqentries = mmap(NULL, entries * sizeof(struct io_uring_sqe),
+	                       PROT_READ | PROT_WRITE, MAP_SHARED/*|MAP_POPULATE*/, fd, IORING_OFF_SQES);
 free:
 	return ret;
 }
