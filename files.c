@@ -2,6 +2,7 @@
 #include <string.h>
 #include <linux/io_uring.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -88,16 +89,41 @@ free:
 	return ret;
 }
 
+struct app_io_sq_ring {
+	unsigned *head;
+	unsigned *tail;
+	unsigned *ring_mask;
+	unsigned *ring_entries;
+	unsigned *flags;
+	unsigned *array;
+};
+struct app_io_cq_ring {
+	unsigned *head;
+	unsigned *tail;
+	unsigned *ring_mask;
+	unsigned *ring_entries;
+	struct io_uring_cqe *cqes;
+};
 struct submitter {
 	int ring_fd;
-
+	struct app_io_sq_ring sq_ring;
+	struct io_uring_sqe *sqes;
+	struct app_io_cq_ring cq_ring;
 };
 
 int io_uring_setup(unsigned entries, struct io_uring_params *params) {
 	return syscall(SYS_io_uring_setup, entries, params);
 }
 
-int read_and_print_file_iouring(char *filename) {
+bool print_err(bool t, char *str) {
+	if (t) {
+		fputs(str, stderr);
+		printf("\n");
+	}
+	return t;
+}
+
+int read_and_print_file_iouring(char *filename, struct submitter *result) {
 	int ret = 0;
 	struct io_uring_params params = {};
 	int fd = 0;
@@ -107,12 +133,59 @@ int read_and_print_file_iouring(char *filename) {
 		ret = 1;
 		goto free;
 	}
-	void *sqring = mmap(NULL, params.sq_off.array + entries * sizeof(__uint32_t),
+	void *sqring, *sqentries, *cqring;
+	sqring = mmap(NULL, params.sq_off.array + entries * sizeof(__uint32_t),
 	                    PROT_READ | PROT_WRITE, MAP_SHARED/*|MAP_POPULATE*/, fd, IORING_OFF_SQ_RING);
-	void *sqentries = mmap(NULL, entries * sizeof(struct io_uring_sqe),
+	if (print_err(sqring == NULL, "Couldn't map submission queue"))
+		return 2;
+	sqentries = mmap(NULL, entries * sizeof(struct io_uring_sqe),
 	                       PROT_READ | PROT_WRITE, MAP_SHARED/*|MAP_POPULATE*/, fd, IORING_OFF_SQES);
+	if (print_err(sqentries == NULL, "Couldn't map submission queue entries"))
+		return 3;
+	cqring = mmap(NULL, params.cq_off.cqes + params.cq_entries * sizeof(struct io_uring_cqe),
+						PROT_READ | PROT_WRITE, MAP_SHARED/*|MAP_POPULATE*/, fd, IORING_OFF_CQ_RING);
+	if (print_err(cqring == NULL, "Couldn't map completion queue"))
+		return 4;
+
+	result->ring_fd = fd;
+	result->sqes = sqentries;
+
+	result->sq_ring.head = sqring + params.sq_off.head;
+	result->sq_ring.tail = sqring + params.sq_off.tail;
+	result->sq_ring.array = sqring + params.sq_off.array;
+	result->sq_ring.flags = sqring + params.sq_off.flags;
+	result->sq_ring.ring_entries = sqring + params.sq_off.ring_entries;
+
+	result->cq_ring.head = cqring + params.cq_off.head;
+	result->cq_ring.tail = cqring + params.cq_off.tail;
+	result->cq_ring.cqes = cqring + params.cq_off.cqes;
+	result->cq_ring.ring_entries = cqring + params.sq_off.ring_entries;
+
 free:
 	return ret;
+}
+struct file_info {
+	off_t file_sz;
+	struct iovec iovecs[];      /* Referred by readv/writev */
+};
+void submitToSq(int fd, struct submitter * submitter) {
+	struct file_info fi;
+	off_t filesize = get_file_size(fd);
+	// 1. Calculate the number of iovecs we need
+	// 2. Init every iovec with the len and buffer
+	// 3. add it to the sqe
+	size_t block_cnt = filesize / BUFFER_SIZE + filesize % BUFFER_SIZE != 0;
+	struct iovec *iovecs = malloc(block_cnt * sizeof(struct iovec));
+	size_t bytesLeft = filesize;
+	for (int i = 0; i < block_cnt; i++, bytesLeft -= BUFFER_SIZE) {
+		iovecs[i].iov_len = min(BUFFER_SIZE, bytesLeft);
+		char *buf = malloc(iovecs[i].iov_len);
+		iovecs[i].iov_base = buf;
+	}
+
+	unsigned *tail = submitter->sq_ring.tail;
+	read_barrier();
+	submitter->sq_ring->
 }
 
 // TODO:
@@ -196,8 +269,10 @@ int main(void) {
 	// read_and_print_file_readv(filename);
 	close(fd);
 
-	struct submitter *s;
-	read_and_print_file_iouring(filename);
+	struct submitter s = {};
+	if (read_and_print_file_iouring(filename, &s))
+		return 5;
+	submitToSq(fd, &s);
 	// if ((errorCode = writesync_hi()))
 		// return errorCode;
 	// if ((errorCode = readsync_lo()))
