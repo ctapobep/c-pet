@@ -25,6 +25,10 @@
 // #endif
 
 #define BUFFER_SIZE 1023
+#include "src/util/signals.c"
+
+#define read_barrier()  __asm__ __volatile__("":::"memory")
+#define write_barrier() __asm__ __volatile__("":::"memory")
 
 off_t get_file_size(int fd) {
 	struct stat st;
@@ -50,7 +54,7 @@ void output_buf(const char *buf, size_t len) {
 	while (len--)
 		fputc(*buf++, stdout);
 }
-long min(long a, long b) {
+unsigned long min(unsigned long a, unsigned long b) {
 	return a < b ? a : b;
 }
 int read_and_print_file_readv(char *filename) {
@@ -93,7 +97,6 @@ struct app_io_sq_ring {
 	unsigned *head;
 	unsigned *tail;
 	unsigned *ring_mask;
-	unsigned *ring_entries;
 	unsigned *flags;
 	unsigned *array;
 };
@@ -101,7 +104,6 @@ struct app_io_cq_ring {
 	unsigned *head;
 	unsigned *tail;
 	unsigned *ring_mask;
-	unsigned *ring_entries;
 	struct io_uring_cqe *cqes;
 };
 struct submitter {
@@ -113,6 +115,9 @@ struct submitter {
 
 int io_uring_setup(unsigned entries, struct io_uring_params *params) {
 	return syscall(SYS_io_uring_setup, entries, params);
+}
+int io_uring_enter(int ring_fd, unsigned int to_submit, unsigned int min_complete, unsigned int flags){
+	return (int) syscall(SYS_io_uring_enter, ring_fd, to_submit, min_complete, flags, NULL, 0);
 }
 
 bool print_err(bool t, char *str) {
@@ -154,13 +159,11 @@ int read_and_print_file_iouring(char *filename, struct submitter *result) {
 	result->sq_ring.tail = sqring + params.sq_off.tail;
 	result->sq_ring.array = sqring + params.sq_off.array;
 	result->sq_ring.flags = sqring + params.sq_off.flags;
-	result->sq_ring.ring_entries = sqring + params.sq_off.ring_entries;
+	result->sq_ring.ring_mask = sqring + params.sq_off.ring_mask;
 
 	result->cq_ring.head = cqring + params.cq_off.head;
 	result->cq_ring.tail = cqring + params.cq_off.tail;
 	result->cq_ring.cqes = cqring + params.cq_off.cqes;
-	result->cq_ring.ring_entries = cqring + params.sq_off.ring_entries;
-
 free:
 	return ret;
 }
@@ -179,13 +182,31 @@ void submitToSq(int fd, struct submitter * submitter) {
 	size_t bytesLeft = filesize;
 	for (int i = 0; i < block_cnt; i++, bytesLeft -= BUFFER_SIZE) {
 		iovecs[i].iov_len = min(BUFFER_SIZE, bytesLeft);
-		char *buf = malloc(iovecs[i].iov_len);
-		iovecs[i].iov_base = buf;
+		iovecs[i].iov_base = malloc(iovecs[i].iov_len);
 	}
 
-	unsigned *tail = submitter->sq_ring.tail;
+	unsigned tail = *submitter->sq_ring.tail;
+	// TODO: read_barrier();
+	tail++;
 	read_barrier();
-	submitter->sq_ring->
+	while (tail == *submitter->sq_ring.head)
+		;
+
+	unsigned index = tail & *submitter->sq_ring.ring_mask;
+	struct io_uring_sqe sqe = submitter->sqes[index];
+	sqe.fd = fd;
+	sqe.opcode = IORING_OP_READ;
+	sqe.addr = (__uint64_t) iovecs;
+	sqe.len = block_cnt;
+
+	submitter->sq_ring.array[index] = index;
+	*submitter->sq_ring.tail = tail;
+
+	write_barrier();// if Kernel is set up to continuously poll w/o a syscall, we'd need the barrier before updating tail
+	int ret = 0;
+	if ((ret = io_uring_enter(submitter->ring_fd, 1, 1, IORING_ENTER_GETEVENTS)) < 0) {
+		fprintf(stderr, "io_uring_enter() returned %d", ret);
+	}
 }
 
 // TODO:
@@ -259,6 +280,7 @@ int readasync_lo() {
 }
 
 int main(void) {
+	register_signals();
 	int errorCode;
 
 	char *filename = "somefile.txt";
