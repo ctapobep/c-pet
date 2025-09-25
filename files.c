@@ -25,6 +25,7 @@
 // #endif
 
 #define BUFFER_SIZE 1023
+#define BLKSIZE 4096
 #include "src/util/signals.c"
 
 #define read_barrier()  __asm__ __volatile__("":::"memory")
@@ -52,7 +53,7 @@ off_t get_file_size(int fd) {
 
 void output_buf(const char *buf, size_t len) {
 	while (len--)
-		fputc(*buf++, stdout);
+		fprintf(stdout, "%c", *buf++);
 }
 unsigned long min(unsigned long a, unsigned long b) {
 	return a < b ? a : b;
@@ -66,7 +67,6 @@ int read_and_print_file_readv(char *filename) {
 	off_t filesize = get_file_size(fd);
 	if (filesize <= 0)
 		return -1;
-#define BLKSIZE 4096
 	int block_cnt = (int)(filesize / BLKSIZE) + (filesize % BLKSIZE > 0);
 
 	struct iovec iovecs[block_cnt];
@@ -112,7 +112,12 @@ struct submitter {
 	struct io_uring_sqe *sqes;
 	struct app_io_cq_ring cq_ring;
 };
+struct iovec_array {
+	struct iovec *array;
+	size_t len;
+};
 
+// https://unixism.net/loti/low_level.html
 int io_uring_setup(unsigned entries, struct io_uring_params *params) {
 	return syscall(SYS_io_uring_setup, entries, params);
 }
@@ -128,27 +133,26 @@ bool print_err(bool t, char *str) {
 	return t;
 }
 
-int read_and_print_file_iouring(char *filename, struct submitter *result) {
+int prepare_io_uring(struct submitter *result) {
 	int ret = 0;
 	struct io_uring_params params = {};
 	int fd = 0;
 	int entries = 1;
 	if ((fd = io_uring_setup(entries, &params)) < 0) {
 		fprintf(stderr, "Couldn't set up io_uring: %d", fd);
-		ret = 1;
-		goto free;
+		return 1;
 	}
 	void *sqring, *sqentries, *cqring;
 	sqring = mmap(NULL, params.sq_off.array + entries * sizeof(__uint32_t),
-	                    PROT_READ | PROT_WRITE, MAP_SHARED/*|MAP_POPULATE*/, fd, IORING_OFF_SQ_RING);
+	                    PROT_READ | PROT_WRITE, MAP_SHARED |MAP_POPULATE, fd, IORING_OFF_SQ_RING);
 	if (print_err(sqring == NULL, "Couldn't map submission queue"))
 		return 2;
 	sqentries = mmap(NULL, entries * sizeof(struct io_uring_sqe),
-	                       PROT_READ | PROT_WRITE, MAP_SHARED/*|MAP_POPULATE*/, fd, IORING_OFF_SQES);
+	                       PROT_READ | PROT_WRITE, MAP_SHARED |MAP_POPULATE, fd, IORING_OFF_SQES);
 	if (print_err(sqentries == NULL, "Couldn't map submission queue entries"))
 		return 3;
 	cqring = mmap(NULL, params.cq_off.cqes + params.cq_entries * sizeof(struct io_uring_cqe),
-						PROT_READ | PROT_WRITE, MAP_SHARED/*|MAP_POPULATE*/, fd, IORING_OFF_CQ_RING);
+						PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_CQ_RING);
 	if (print_err(cqring == NULL, "Couldn't map completion queue"))
 		return 4;
 
@@ -164,7 +168,7 @@ int read_and_print_file_iouring(char *filename, struct submitter *result) {
 	result->cq_ring.head = cqring + params.cq_off.head;
 	result->cq_ring.tail = cqring + params.cq_off.tail;
 	result->cq_ring.cqes = cqring + params.cq_off.cqes;
-free:
+	result->cq_ring.ring_mask = cqring + params.cq_off.ring_mask;
 	return ret;
 }
 struct file_info {
@@ -177,40 +181,73 @@ void submitToSq(int fd, struct submitter * submitter) {
 	// 1. Calculate the number of iovecs we need
 	// 2. Init every iovec with the len and buffer
 	// 3. add it to the sqe
-	size_t block_cnt = filesize / BUFFER_SIZE + filesize % BUFFER_SIZE != 0;
+	size_t block_cnt = filesize / BLKSIZE + (filesize % BLKSIZE != 0);
+	printf("[SUBMIT] Filesize: %lu, block count: %lu\n", filesize, block_cnt);
 	struct iovec *iovecs = malloc(block_cnt * sizeof(struct iovec));
 	size_t bytesLeft = filesize;
-	for (int i = 0; i < block_cnt; i++, bytesLeft -= BUFFER_SIZE) {
-		iovecs[i].iov_len = min(BUFFER_SIZE, bytesLeft);
+	for (int i = 0; i < block_cnt; i++, bytesLeft -= BLKSIZE) {
+		iovecs[i].iov_len = min(BLKSIZE, bytesLeft);
 		iovecs[i].iov_base = malloc(iovecs[i].iov_len);
 	}
+	struct iovec_array *iovec_array = malloc(sizeof(struct iovec_array));
+	iovec_array->array = iovecs;
+	iovec_array->len = block_cnt;
 
 	unsigned tail = *submitter->sq_ring.tail;
-	// TODO: read_barrier();
-	tail++;
 	read_barrier();
-	while (tail == *submitter->sq_ring.head)
-		;
-
+	fprintf(stdout, "[SUBMIT] tail=%u (%p), head=%u (%p)\n",
+		tail, submitter->sq_ring.tail,
+		*submitter->sq_ring.head, submitter->sq_ring.head);
 	unsigned index = tail & *submitter->sq_ring.ring_mask;
-	struct io_uring_sqe sqe = submitter->sqes[index];
-	sqe.fd = fd;
-	sqe.opcode = IORING_OP_READ;
-	sqe.addr = (__uint64_t) iovecs;
-	sqe.len = block_cnt;
+	struct io_uring_sqe *sqe = &submitter->sqes[index];
+	sqe->fd = fd;
+	sqe->opcode = IORING_OP_READV;
+	sqe->addr = (__uint64_t) iovecs;
+	sqe->len = block_cnt;
+	sqe->user_data = (__uint64_t) iovec_array;
+	sqe->off = 0;
+	fprintf(stdout, "[SUBMIT] Set sqe[%d].user_data=%lld (%p), submitted %lu iovecs\n", index, sqe->user_data, iovecs, block_cnt);
 
 	submitter->sq_ring.array[index] = index;
-	*submitter->sq_ring.tail = tail;
-
+	(*submitter->sq_ring.tail)++;
 	write_barrier();// if Kernel is set up to continuously poll w/o a syscall, we'd need the barrier before updating tail
+	fprintf(stdout, "[SUBMIT] New SQ tail=%u (%p)\n", *submitter->sq_ring.tail, submitter->sq_ring.tail);
+
 	int ret = 0;
 	if ((ret = io_uring_enter(submitter->ring_fd, 1, 1, IORING_ENTER_GETEVENTS)) < 0) {
-		fprintf(stderr, "io_uring_enter() returned %d", ret);
+		fprintf(stderr, "io_uring_enter() returned %d\n", ret);
 	}
+	fprintf(stdout, "[SUBMIT] Finished submitting %d\n", ret);
+}
+void readFromCq(struct submitter *s) {
+	struct app_io_cq_ring *cqring = &s->cq_ring;
+	do {
+		read_barrier();
+		while (*cqring->tail == *cqring->head)
+			;
+		fprintf(stdout, "[READ  ] cqe.tail=%u %p, head=%u %p\n", *cqring->tail, cqring->tail, *cqring->head, cqring->head);
+		struct io_uring_cqe *cqe = &cqring->cqes[*cqring->head & *cqring->ring_mask];
+		fprintf(stdout, "[READ  ] cqe user_data=%lld, result=%d, flags=%d\n", cqe->user_data, cqe->res, cqe->flags);
+		if (cqe->res < 0) {
+			fprintf(stderr, "[READ  ] The Completion Queue Entry (CQE) result: %d", cqe->res);
+			return;
+		}
+
+		struct iovec_array *iovec_array = (struct iovec_array*)cqe->user_data;
+		fprintf(stdout, "[READ  ] Writing out %lu blocks:\n", iovec_array->len);
+		for (int i = 0; i < iovec_array->len; i++) {
+			output_buf(iovec_array->array[i].iov_base, iovec_array->array[i].iov_len);
+			free(iovec_array->array[i].iov_base);
+		}
+		fprintf(stdout, "\n");
+		free(iovec_array);
+
+		(*cqring->head)++;
+		write_barrier();
+	} while (true);
 }
 
 // TODO:
-// 1. Use io_uring
 // 2. Use epoll
 // 2. Implement MacOS async io
 
@@ -289,12 +326,14 @@ int main(void) {
 		printf("Couldn't open the file: %d\n", fd);
 	printf("Bytes in the file: %ld\n", get_file_size(fd));
 	// read_and_print_file_readv(filename);
-	close(fd);
 
 	struct submitter s = {};
-	if (read_and_print_file_iouring(filename, &s))
+	if (prepare_io_uring(&s))
 		return 5;
 	submitToSq(fd, &s);
+	readFromCq(&s);
+	close(fd);
+
 	// if ((errorCode = writesync_hi()))
 		// return errorCode;
 	// if ((errorCode = readsync_lo()))
